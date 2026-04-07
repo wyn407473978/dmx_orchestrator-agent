@@ -51,40 +51,111 @@ class OpenAPIExporter:
         return routes
 
     def _parse_route_file(self, file_path: Path) -> List[Dict[str, Any]]:
-        """解析路由文件"""
+        """解析路由文件（增强版）"""
         routes = []
         content = file_path.read_text(encoding='utf-8')
 
-        # Go 路由模式
-        # e.g., router.HandleFunc("/users", handler).Methods("GET")
-        go_pattern = r'(?:router|Route|HandleFunc|Mux)\s*[.(]\s*"([^"]+)"\s*,\s*(\w+)\s*\)(?:\.Methods\s*\(\s*"([A-Z]+)"\s*\))?'
+        # === Go Gin 路由模式 ===
+        # router.HandleFunc("/users", handler).Methods("GET", "POST")
+        go_pattern = r'(?:router|Route|HandleFunc|Mux)\s*[.(]\s*"([^"]+)"\s*,\s*(\w+)\s*\)(?:\.Methods\s*\(\s*"([A-Z]+)"\s*(?:,\s*"([A-Z]+)")*\s*\))?'
 
         for match in re.finditer(go_pattern, content):
             path = match.group(1)
             handler = match.group(2)
-            method = match.group(3) or "GET"
+            methods = [m for m in [match.group(3), match.group(4)] if m]
+            
+            if not methods:
+                methods = ["GET"]
+            
+            for method in methods:
+                routes.append({
+                    "path": path,
+                    "method": method.upper(),
+                    "handler": handler,
+                    "source_file": str(file_path)
+                })
 
+        # === Go Gorilla Mux 路由模式 ===
+        # mux.Methods("GET", "POST").Path("/users").HandlerFunc(handler)
+        gorilla_pattern = r'\.Path\s*\(\s*"([^"]+)"\s*\)\s*\.HandlerFunc\s*\(\s*(\w+)\s*\)\s*\.Methods\s*\(\s*"([A-Z]+)"\s*(?:,\s*"([A-Z]+)")*'
+        
+        for match in re.finditer(gorilla_pattern, content):
+            path = match.group(1)
+            handler = match.group(2)
+            methods = [m for m in [match.group(3), match.group(4)] if m] or ["GET"]
+            
+            for method in methods:
+                routes.append({
+                    "path": path,
+                    "method": method.upper(),
+                    "handler": handler,
+                    "source_file": str(file_path)
+                })
+
+        # === Python FastAPI 装饰器模式 ===
+        # @app.get("/users")
+        # @router.post("/users")
+        fastapi_pattern = r'@(\w+)\.(get|post|put|patch|delete|options|head)\s*\(\s*"([^"]+)"\s*\)'
+        
+        for match in re.finditer(fastapi_pattern, content):
+            decorator = match.group(1)
+            method = match.group(2).upper()
+            path = match.group(3)
+            
+            routes.append({
+                "path": path,
+                "method": method,
+                "handler": f"{decorator}_handler",
+                "source_file": str(file_path)
+            })
+
+        # === Python Flask 路由模式 ===
+        # @app.route('/users', methods=['GET', 'POST'])
+        flask_pattern = r'@app\.route\s*\(\s*"([^"]+)"\s*(?:,\s*methods\s*=\s*\[(?:"([A-Z]+)"(?:,\s*)?)*\])?'
+        
+        for match in re.finditer(flask_pattern, content):
+            path = match.group(1)
+            method = match.group(2) or "GET"
+            
             routes.append({
                 "path": path,
                 "method": method.upper(),
+                "handler": "flask_handler",
+                "source_file": str(file_path)
+            })
+
+        # === Express.js 路由模式 ===
+        # router.get('/users', handler)
+        # app.post('/users', handler)
+        express_pattern = r'(?:router|app)\.(\w+)\s*\(\s*["\'](/[^"\']+)["\']\s*,\s*(\w+)\s*\)'
+        
+        for match in re.finditer(express_pattern, content):
+            method = match.group(1).upper()
+            path = match.group(2)
+            handler = match.group(3)
+            
+            routes.append({
+                "path": path,
+                "method": method,
                 "handler": handler,
                 "source_file": str(file_path)
             })
 
-        # Python FastAPI 模式
-        # e.g., @app.get("/users")
-        py_pattern = r'@(?:app|router)\.(\w+)\s*\(\s*"([^"]+)"\s*\)'
+        # === Next.js App Router 模式 ===
+        # export async function GET(request: Request) {}
+        # route.ts or route.js
+        if file_path.name in ['route.ts', 'route.js', 'route.tsx', 'route.jsx']:
+            nextjs_pattern = r'export\s+async\s+function\s+(\w+)\s*\('
+            for match in re.finditer(nextjs_pattern, content):
+                method = match.group(1).upper()
+                routes.append({
+                    "path": "/",
+                    "method": method,
+                    "handler": "nextjs_route_handler",
+                    "source_file": str(file_path)
+                })
 
-        for match in re.finditer(py_pattern, content):
-            method = match.group(1).upper()
-            path = match.group(2)
-
-            routes.append({
-                "path": path,
-                "method": method,
-                "handler": "auto_generated",
-                "source_file": str(file_path)
-            })
+        return routes
 
         return routes
 

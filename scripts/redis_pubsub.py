@@ -310,7 +310,6 @@ if __name__ == "__main__":
 
     if args.command is None:
         parser.print_help()
-        return
 
     bus = RedisMessageBus(args.project)
 
